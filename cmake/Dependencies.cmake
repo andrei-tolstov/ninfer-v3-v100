@@ -12,6 +12,21 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(HWLOC REQUIRED IMPORTED_TARGET hwloc>=2.5)
 pkg_check_modules(URING REQUIRED IMPORTED_TARGET liburing>=2.5)
 
+# CUTLASS: Volta (sm_70) uses native FP16 tensor cores via CUTLASS Sm70 template API.
+if(NINFER_TARGET_VOLTA)
+  include(FetchContent)
+  set(CUTLASS_ENABLE_HEADERS_ONLY ON CACHE BOOL "Enable only the header library")
+  set(CUTLASS_ENABLE_TESTS OFF CACHE BOOL "Disable CUTLASS tests")
+  set(CUTLASS_ENABLE_EXAMPLES OFF CACHE BOOL "Disable CUTLASS examples")
+  FetchContent_Declare(
+    cutlass
+    GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+    GIT_TAG v4.4.2
+    GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE)
+  FetchContent_MakeAvailable(cutlass)
+endif()
+
 # Repository-pinned header dependencies. No configure-time downloads.
 add_library(ninfer::json INTERFACE IMPORTED GLOBAL)
 target_include_directories(ninfer::json INTERFACE

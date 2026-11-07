@@ -36,6 +36,7 @@ enum class QuantLayout : std::uint16_t {
     BlockScaleM64K64           = 7,
     Csf32                      = 8,
     RowGroupScale              = 9,
+    VoltaQpnPrepacked          = 10,
 };
 
 enum class MatrixScaleOperation : std::uint8_t { None, Divide, Multiply };

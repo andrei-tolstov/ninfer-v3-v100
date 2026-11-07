@@ -1,5 +1,9 @@
 set(NINFER_TARGET rtx5090 CACHE STRING "NInfer execution target")
-set_property(CACHE NINFER_TARGET PROPERTY STRINGS rtx5090 dgx_spark)
+set_property(CACHE NINFER_TARGET PROPERTY STRINGS rtx5090 dgx_spark v100)
+
+if(DEFINED CMAKE_CUDA_ARCHITECTURES AND CMAKE_CUDA_ARCHITECTURES STREQUAL "70" AND NOT DEFINED NINFER_CONFIGURED_TARGET)
+  set(NINFER_TARGET v100 CACHE STRING "NInfer execution target" FORCE)
+endif()
 
 if(DEFINED NINFER_CONFIGURED_TARGET AND
    NOT NINFER_CONFIGURED_TARGET STREQUAL NINFER_TARGET)
@@ -10,6 +14,7 @@ endif()
 
 set(NINFER_TARGET_RTX5090 0)
 set(NINFER_TARGET_SPARK 0)
+set(NINFER_TARGET_VOLTA 0)
 if(NINFER_TARGET STREQUAL "rtx5090")
   set(NINFER_TARGET_RTX5090 1)
   set(NINFER_CUDA_ARCHITECTURE 120a)
@@ -18,8 +23,16 @@ elseif(NINFER_TARGET STREQUAL "dgx_spark")
   set(NINFER_TARGET_SPARK 1)
   set(NINFER_CUDA_ARCHITECTURE 121a)
   set(NINFER_PROCESSOR_PATTERN "^(aarch64|arm64|ARM64)$")
+elseif(NINFER_TARGET STREQUAL "v100")
+  set(NINFER_TARGET_VOLTA 1)
+  set(NINFER_CUDA_ARCHITECTURE 70)
+  set(NINFER_PROCESSOR_PATTERN "^(x86_64|amd64|AMD64)$")
 else()
   message(FATAL_ERROR "Unknown NINFER_TARGET '${NINFER_TARGET}'")
+endif()
+
+if(NINFER_TARGET_VOLTA)
+  add_compile_definitions(NINFER_VOLTA_BUILD=1)
 endif()
 
 # CUDA compiler detection must see the selected architecture, not a host default.
@@ -44,6 +57,20 @@ function(ninfer_validate_platform)
     message(FATAL_ERROR
       "${NINFER_TARGET} does not support ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}")
   endif()
+
+  if(NINFER_TARGET_VOLTA)
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.8)
+      message(FATAL_ERROR
+        "The sm_70 Volta port requires CUDA 12.8 or newer; found CUDA compiler "
+        "${CMAKE_CUDA_COMPILER_VERSION}")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+      message(FATAL_ERROR
+        "sm_70 requires CUDA 12.8; CUDA 13.x no longer assembles Volta device code (found "
+        "${CMAKE_CUDA_COMPILER_VERSION})")
+    endif()
+  endif()
+
   set(NINFER_CONFIGURED_TARGET ${NINFER_TARGET} CACHE INTERNAL "Configured NInfer target")
   configure_file(${PROJECT_SOURCE_DIR}/src/core/platform.h.in
     ${PROJECT_BINARY_DIR}/generated/core/platform.h @ONLY)
