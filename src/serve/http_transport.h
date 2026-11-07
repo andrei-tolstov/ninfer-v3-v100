@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <memory>
 #include <stdexcept>
@@ -16,11 +17,6 @@
 #include <vector>
 
 namespace ninfer::serve {
-
-class ClientDisconnected final : public std::exception {
-public:
-    [[nodiscard]] const char* what() const noexcept override { return "client disconnected"; }
-};
 
 class ResponseRenderFailure final : public std::runtime_error {
 public:
@@ -44,16 +40,14 @@ public:
 
     explicit SseTransport(httplib::DataSink& sink, std::atomic<bool>& cancelled,
                           Clock::duration heartbeat_interval = kHeartbeatInterval,
-                          Clock::time_point now              = Clock::now(),
-                          std::string_view heartbeat          = kHeartbeatComment);
+                          Clock::time_point now              = Clock::now());
 
     void write(std::string_view item, Clock::time_point now = Clock::now());
     void write(const std::vector<std::string>& items, Clock::time_point now = Clock::now());
 
     // Called by the Engine wait loop. Besides observing an already-closed socket, a quiet stream
-    // periodically writes its protocol-selected SSE heartbeat so TCP_USER_TIMEOUT has traffic
-    // with which to detect an unacknowledged peer. A failed probe marks the request for
-    // cancellation.
+    // periodically writes an SSE comment so TCP_USER_TIMEOUT has traffic with which to detect an
+    // unacknowledged peer. A failed probe marks the request for cancellation.
     [[nodiscard]] bool poll(Clock::time_point now = Clock::now());
 
 private:
@@ -62,7 +56,6 @@ private:
     httplib::DataSink& sink_;
     std::atomic<bool>& cancelled_;
     Clock::duration heartbeat_interval_;
-    std::string heartbeat_;
     Clock::time_point last_write_;
 };
 
@@ -81,6 +74,8 @@ RequestJson parse_json_body(const httplib::Request& request);
 
 void prepare_sse_response(httplib::Response& response);
 void configure_http_server_socket(socket_t socket) noexcept;
+[[nodiscard]] std::unique_ptr<httplib::TaskQueue> make_http_task_queue(std::size_t workers,
+                                                                       std::size_t queued_requests);
 void set_owned_json_content(httplib::Response& response, std::string body,
                             std::shared_ptr<RequestLifetime> lifetime);
 

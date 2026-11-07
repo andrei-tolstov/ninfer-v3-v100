@@ -1,8 +1,9 @@
 #include "product/logging/logging.h"
+#include "product/logging/configuration.h"
 #include "product/logging/startup_log.h"
 #include "serve/generation_service.h"
 #include "serve/http_server.h"
-#include "serve/serve_options.h"
+#include "product/config/options.h"
 
 #include <spdlog/logger.h>
 
@@ -14,39 +15,40 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace {
 
-std::atomic<ninfer::serve::HttpServer*> g_server{nullptr};
+static_assert(std::atomic<bool>::is_always_lock_free);
+std::atomic<bool> g_stop_requested{false};
 
-void handle_signal(int) {
-    ninfer::serve::HttpServer* server = g_server.load();
-    if (server != nullptr) { server->stop(); }
-}
+void handle_signal(int) { g_stop_requested.store(true, std::memory_order_relaxed); }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    ninfer::serve::ServeOptions options;
+    ninfer::product::ServeOptions options;
     try {
-        options = ninfer::serve::parse_serve_options(argc, argv);
+        options = ninfer::product::parse_serve_options(argc, argv);
     } catch (const std::invalid_argument& exception) {
         std::cerr << "ninfer-serve: " << exception.what() << '\n';
-        std::cerr << ninfer::serve::serve_usage_text(argv[0]);
+        std::cerr << ninfer::product::startup_usage_text(argv[0],
+                                                         ninfer::product::EntryPoint::Serve);
         return 1;
     } catch (const std::exception& exception) {
         std::cerr << "ninfer-serve: " << exception.what() << '\n';
         return 1;
     }
     if (options.help_requested) {
-        std::cout << ninfer::serve::serve_usage_text(argv[0]);
+        std::cout << ninfer::product::startup_usage_text(argv[0],
+                                                         ninfer::product::EntryPoint::Serve);
         return 0;
     }
 
     ninfer::product::LoggingRuntime logging(
         {.logger_name  = "ninfer-serve",
-         .level        = options.log_level,
+         .level        = options.launch.logging.level,
          .presentation = ninfer::product::LogPresentation::Service});
     const std::shared_ptr<spdlog::logger> logger = logging.logger();
     ninfer::product::StartupLogRenderer startup_log(logging);
@@ -54,6 +56,7 @@ int main(int argc, char** argv) {
     bool serving = false;
 
     try {
+        ninfer::product::log_configuration(*logger, ninfer::product::configuration_view(options));
         ninfer::serve::HttpServer server(options, logger);
         if (!server.bind()) {
             operational_log.bind_failure(options.host, options.port);
@@ -61,7 +64,7 @@ int main(int argc, char** argv) {
         }
 
         ninfer::serve::GenerationService service(options, startup_log.observer());
-        startup_log.engine_ready(service.load_summary());
+        startup_log.engine_ready(service.startup_report().load);
         operational_log.engine_capacity(service);
 
         using Clock                            = std::chrono::steady_clock;
@@ -79,7 +82,6 @@ int main(int argc, char** argv) {
             std::chrono::duration<double>(Clock::now() - warmup_started).count());
         server.attach(service);
 
-        g_server.store(&server);
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
 
@@ -87,8 +89,16 @@ int main(int argc, char** argv) {
         operational_log.server_ready(options.host, options.port, server.public_model_id(),
                                      !options.api_key.empty());
 
+        std::jthread stop_monitor([&server](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                if (g_stop_requested.load(std::memory_order_relaxed)) {
+                    server.stop();
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        });
         const bool ok = server.listen();
-        g_server.store(nullptr);
         if (!ok) {
             operational_log.listen_failure(options.host, options.port);
             return 1;
@@ -96,7 +106,6 @@ int main(int argc, char** argv) {
         operational_log.server_stopped();
         return 0;
     } catch (const std::exception& exception) {
-        g_server.store(nullptr);
         operational_log.server_failure(serving, exception.what());
         return 1;
     }

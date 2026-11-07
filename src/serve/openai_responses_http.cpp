@@ -77,7 +77,8 @@ OpenAIResponseContext terminal_context(OpenAIResponseContext previous,
 
 void commit_stored_response(OpenAIResponsesStore& store, PendingResponseStorage pending,
                             std::string id, const Json& response,
-                            std::vector<ChatTurn> output_history, bool preserve_thinking) {
+                            std::vector<ChatTurn> output_history,
+                            std::optional<bool> preserve_thinking) {
     if (!pending.enabled) { return; }
     if (pending.session_key.empty()) {
         throw std::logic_error("stored Response has no Engine session key");
@@ -99,7 +100,7 @@ OpenAIResponsesRuntimeValues runtime_values(const PreparedRequest& prepared,
     runtime.temperature = prepared.sampling.temperature;
     runtime.top_p       = prepared.sampling.top_p;
     if (outcome != nullptr) {
-        runtime.cached_input_tokens = static_cast<int>(outcome->metrics.prefix_cache_hit_tokens);
+        runtime.cached_input_tokens = static_cast<int>(outcome->stats.reused_prompt_tokens);
     }
     return runtime;
 }
@@ -243,7 +244,7 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
     const std::string id = new_openai_response_id();
     try {
         RequestLimits limits;
-        limits.default_max_tokens = options_.default_max_tokens;
+        limits.default_max_tokens = options_.launch.generation.max_tokens;
         request = parse_openai_responses_create_request(parse_json_body(req), limits);
         validate_openai_model(request.prompt.model, public_model_id_);
         resolved = resolve_openai_responses_prompt(request.prompt, openai_responses_store_, id,
@@ -261,17 +262,23 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
 
     const std::uint64_t req_id = ++request_seq_;
     const RequestLogMetadata metadata{
+        .http_request_id                   = res.get_header_value("x-request-id"),
+        .response_id                       = id,
         .model                             = request.prompt.model,
         .stream                            = request.stream,
         .output_tokens_explicit            = request.requested_max_output_tokens.has_value(),
         .preserve_thinking_semantic_change = resolved.preserve_thinking_semantic_change,
     };
+    observations_.preparing(req_id, "openai_responses", metadata);
     PreparedRequest prepared;
     try {
         prepared = service_->prepare(
             resolved.generation,
             request.stream ? GenerationConsumerMode::Streaming : GenerationConsumerMode::Aggregate,
-            {}, [&req] { return client_disconnected(req); }, std::move(resolved.cache_hints));
+            {.constraint_timings = true,
+             .scheduling         = scheduling_observer(req_id, metadata.http_request_id),
+             .first_token        = first_token_observer(req_id)},
+            [&req] { return client_disconnected(req); }, std::move(resolved.cache_hints));
     } catch (const ApiException& exception) {
         const ApiError error = responses_error(exception.error());
         record_request_rejected(make_request_rejection_log_context(
@@ -291,27 +298,33 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
         req_id, "openai_responses", resolved.generation, metadata, prepared));
     resolved.generation.messages.clear();
 
-    if (!request.stream) {
-        GenerationOutcome outcome;
-        try {
-            outcome = service_->run(prepared, nullptr, [&req] { return client_disconnected(req); });
-        } catch (const ApiException& exception) {
-            const ApiError error = responses_error(exception.error());
-            lifecycle->failure(make_generation_request_failure(error));
-            write_openai_error(res, error);
-            return;
-        } catch (const std::exception& exception) {
-            lifecycle->failure(
-                make_internal_request_failure(RequestFailurePhase::Generation, exception.what()));
-            write_openai_error(res, internal_error(exception));
-            return;
+    GenerationOutcome aggregate;
+    try {
+        if (request.stream) {
+            service_->wait_for_admission(prepared, [&req] { return client_disconnected(req); });
+        } else {
+            aggregate =
+                service_->run(prepared, nullptr, [&req] { return client_disconnected(req); });
         }
-        lifecycle->done(outcome);
+    } catch (const ApiException& exception) {
+        const ApiError error = responses_error(exception.error());
+        lifecycle->failure(make_generation_request_failure(error));
+        write_openai_error(res, error);
+        return;
+    } catch (const std::exception& exception) {
+        lifecycle->failure(
+            make_internal_request_failure(RequestFailurePhase::Generation, exception.what()));
+        write_openai_error(res, internal_error(exception));
+        return;
+    }
+
+    if (!request.stream) {
+        lifecycle->done(aggregate);
 
         std::optional<BuiltOpenAIResponse> response;
         try {
-            const OpenAIResponsesRuntimeValues runtime = runtime_values(prepared, &outcome);
-            response.emplace(make_openai_response_object(id, created, request, runtime, outcome));
+            const OpenAIResponsesRuntimeValues runtime = runtime_values(prepared, &aggregate);
+            response.emplace(make_openai_response_object(id, created, request, runtime, aggregate));
         } catch (const ApiException& exception) {
             const ApiError error = responses_error(exception.error());
             lifecycle->response_failure(
@@ -418,6 +431,18 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
                         render_and_write(transport,
                                          [&] { return stream->encoder->content_delta(text); });
                     };
+                    output.on_tool_start = [&](const ninfer::ToolCallStart& event) {
+                        render_and_write(transport,
+                                         [&] { return stream->encoder->tool_start(event); });
+                    };
+                    output.on_tool_arguments = [&](const ninfer::ToolArgumentsDelta& event) {
+                        render_and_write(transport,
+                                         [&] { return stream->encoder->tool_arguments(event); });
+                    };
+                    output.on_tool_end = [&](const ninfer::ToolCallEnd& event) {
+                        render_and_write(transport,
+                                         [&] { return stream->encoder->tool_end(event); });
+                    };
                     output.is_cancelled = [&] { return transport.poll(); };
 
                     outcome = service_->run(stream->prepared, &output);
@@ -442,6 +467,12 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
                 }
 
                 lifecycle->done(outcome);
+                if (outcome.finish_reason == ninfer::FinishReason::Cancelled ||
+                    stream->cancelled.load(std::memory_order_acquire)) {
+                    lifecycle->response_failure(
+                        make_client_disconnected_failure(RequestFailurePhase::Transport));
+                    return false;
+                }
                 std::optional<OpenAIResponsesStreamFinish> finished;
                 try {
                     finished.emplace(stream->encoder->finish(outcome));
@@ -511,7 +542,7 @@ void HttpServer::handle_responses(const httplib::Request& req, httplib::Response
 void HttpServer::handle_response_input_tokens(const httplib::Request& req, httplib::Response& res) {
     try {
         RequestLimits limits;
-        limits.default_max_tokens = options_.default_max_tokens;
+        limits.default_max_tokens = options_.launch.generation.max_tokens;
         OpenAIResponsesPromptRequest request =
             parse_openai_responses_input_tokens_request(parse_json_body(req), limits);
         validate_openai_model(request.model, public_model_id_);

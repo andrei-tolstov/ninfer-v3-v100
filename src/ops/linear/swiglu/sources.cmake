@@ -1,0 +1,48 @@
+target_sources(ninfer_ops PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/bias.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/dispatch.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/fp8/shapes/n34816_k5120/dispatch.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/linear_swiglu.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/dispatch.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/dispatch.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/fp8/shapes/n34816_k5120/a16.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/fp8/shapes/n34816_k5120/a8.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/a16.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/a4.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/materialized.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/mma.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q4/shapes/n34816_k5120/small.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q8/shapes/n12288_k2048.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/q8/shapes/n34816_k5120.cu"
+)
+
+include("${CMAKE_CURRENT_LIST_DIR}/nvfp4_mul/sources.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/mxfp8/sources.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/fp8_block/sources.cmake")
+
+target_sources(ninfer_ops_non_rdc PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n34816_k5120/a4_tma.cu"
+)
+
+if(NINFER_TARGET STREQUAL "dgx_spark")
+  target_sources(ninfer_ops_non_rdc PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/bf16/dgx_spark/shapes/n8192_k1024_bias.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/bf16/dgx_spark/shapes/n20480_k4096.cu")
+  target_sources(ninfer_ops_non_rdc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/q8/dgx_spark/shapes/n2048_k4096.cu")
+  target_sources(ninfer_ops PRIVATE "${CMAKE_CURRENT_LIST_DIR}/nvfp4/dgx_spark/shapes/n12288_k4096.cu")
+  target_sources(ninfer_ops_non_rdc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/nvfp4/dgx_spark/shapes/n12288_k4096_tma.cu")
+  target_sources(ninfer_ops PRIVATE "${CMAKE_CURRENT_LIST_DIR}/bf16/dgx_spark/shapes/n2048_k4096.cu")
+endif()
+
+if(NINFER_TARGET_VOLTA)
+  target_sources(ninfer_ops PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_cutlass_sm70.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_qpn_split.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_volta_qpn.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/nvfp4_linear_swiglu_qpn_split.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/nvfp4_linear_swiglu_volta_qpn.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/q4_linear_swiglu_cutlass_sm70.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/w8_linear_swiglu_gemm_splitk.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/w8_linear_swiglu_decode.cu"
+  )
+endif()

@@ -11,7 +11,10 @@
 namespace ninfer::serve {
 
 struct RequestLogContext {
-    std::uint64_t id = 0;
+    std::uint64_t engine_request_id = 0;
+    std::uint64_t id                = 0;
+    std::string http_request_id;
+    std::string response_id;
     std::string protocol;
     std::string model;
     bool stream                             = false;
@@ -25,8 +28,7 @@ struct RequestLogContext {
     bool enable_thinking  = true;
     std::optional<std::uint32_t> thinking_budget;
     std::optional<RequestedReasoningEffort> requested_reasoning_effort;
-    std::optional<ninfer::ReasoningEffort> resolved_reasoning_effort;
-    bool preserve_thinking                 = false;
+    std::optional<bool> preserve_thinking;
     bool preserve_thinking_semantic_change = false;
     ninfer::ResolvedSamplingParameters sampling;
     double acquisition_seconds = 0.0;
@@ -34,6 +36,8 @@ struct RequestLogContext {
 };
 
 struct RequestLogMetadata {
+    std::string http_request_id;
+    std::string response_id;
     std::string model;
     bool stream                            = false;
     bool output_tokens_explicit            = false;
@@ -44,6 +48,8 @@ struct RequestLogMetadata {
 // separate shape because sampler and prompt semantics may not have resolved.
 struct RequestRejectionLogContext {
     std::uint64_t id = 0;
+    std::string http_request_id;
+    std::string response_id;
     std::string protocol;
     std::string model;
     bool stream                             = false;
@@ -90,6 +96,7 @@ struct RequestFailure {
 };
 
 struct ThroughputReport {
+    ExecutionStatistics previous_execution{}, current_execution{};
     double interval_seconds               = 0.0;
     std::uint64_t computed_prefill_tokens = 0;
     std::uint64_t committed_decode_tokens = 0;
@@ -97,6 +104,17 @@ struct ThroughputReport {
     std::uint64_t decode_row_rounds       = 0;
     ninfer::RuntimeStats previous;
     ninfer::RuntimeStats current;
+    bool final_interval = false;
+
+    [[nodiscard]] std::uint64_t replayed_tokens() const noexcept {
+        return current.replayed_tokens >= previous.replayed_tokens
+                   ? current.replayed_tokens - previous.replayed_tokens
+                   : 0;
+    }
+
+    [[nodiscard]] double replay_tokens_per_second() const noexcept {
+        return interval_seconds > 0 ? double(replayed_tokens()) / interval_seconds : 0;
+    }
 };
 
 RequestLogContext make_request_log_context(std::uint64_t id, std::string protocol,

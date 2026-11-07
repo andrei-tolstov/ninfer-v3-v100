@@ -1,5 +1,10 @@
 # Serving performance methodology
 
+This document defines the recorded RTX 5090 campaigns linked from the [performance index](../performance.md).
+Their resource settings and commands belong to those campaigns. Current capacity controls and
+measurement commands are described in [startup configuration](../startup-configuration.md) and
+[benchmarks](../../bench/README.md).
+
 [Performance index](../performance.md) · [Runner usage](../../tools/bench/README.md#serving-corpus-benchmark)
 
 This is the measurement and publication reference for the serving results in this directory.
@@ -9,17 +14,17 @@ performance.
 
 ## Common serving profile
 
-The published runs use the following common settings. Model-page run records specify context,
-concurrency, KV capacity, driver API version, sampling exceptions, and artifact paths.
+The published runs use the following settings. Model-page run records specify context,
+concurrency, KV representation and capacity, toolchain, sampling exceptions, and artifact paths.
 These are recorded experimental settings, not promises about current executable defaults.
 
 | Setting | Value |
 |---|---|
 | GPU | One NVIDIA GeForce RTX 5090, 32 GiB |
-| CUDA compile/runtime | 13.1 / 13.1 |
+| CUDA compile/runtime | Qwen3.8: 13.4 / 13.4; Qwen3.6: 13.1 / 13.1 |
 | Route | Persistent `ninfer-serve`, loopback OpenAI Chat Completions, `stream=false` |
 | Prefill chunk | 1,024 tokens |
-| KV cache | INT8 group-64 |
+| KV cache | Qwen3.8: FP8 E4M3 row-256; Qwen3.6: INT8 group-64 |
 | CUDA Graph | Enabled |
 | Prefix reuse | Disabled |
 | Stochastic sampling | Temperature 0.6, top-p 0.95, top-k 20, min-p 0, presence penalty 1.0, frequency penalty 0 |
@@ -29,9 +34,9 @@ These are recorded experimental settings, not promises about current executable 
 | Report label | Runner mode | Server options |
 |---|---|---|
 | MTP0 (no speculation) | `mtp0` | No `--spec` |
-| MTP3 | `mtp3` | `--spec mtp --draft-tokens 3 --lm-head-draft` |
-| DFlash, block=8 | `dflash7` | `--spec dflash --draft-tokens 7 --lm-head-draft` |
-| DFlash2, block=8 | `dflash2_7` | `--spec dflash2 --draft-tokens 7 --lm-head-draft` |
+| MTP3 | `mtp3` | `--spec mtp --draft-tokens 3 --proposal-head optimized` |
+| DFlash, block=8 | `dflash7` | `--spec dflash --draft-tokens 7 --proposal-head optimized` |
+| DFlash2, block=8 | `dflash2_7` | `--spec dflash2 --draft-tokens 7 --proposal-head optimized` |
 
 `K` denotes draft tokens; block size is `K+1`. Weight format, backend, draft count, and proposal
 head are separate experimental dimensions.
@@ -77,16 +82,18 @@ response. Each request has a 16,384-token context ceiling; the measured automati
 
 Steady throughput includes only complete one-second server intervals with zero computed prefill
 tokens, `running=C`, `prefilling=0`, `decode_ready=C`, at least one decode round, and exactly C rows
-in every round. Ramp-up, prefill, and drain are excluded. Wave makespan still spans client release
-through the last complete response. Acceptance is aggregated over the full wave, not just steady
-intervals. Each published point is one wave, not a repeated-sample mean.
+in every round. Intervals must have no preemptions, Snapshot/Replay restores or replayed tokens,
+and no paused or replaying requests at the end. Ramp-up, prefill, recovery, and drain are excluded.
+Wave makespan still spans client release through the last complete response. Acceptance is
+aggregated over the full wave, not just steady intervals. Each published point is one wave,
+not a repeated-sample mean.
 
 ## Metrics and statistics
 
 | Published metric | Definition |
 |---|---|
 | Prefill phase (tok/s) | `prompt_tokens / prefill_seconds` for each serial request |
-| Server TTFT (ms) | `1000 * (prepare_seconds + vision_seconds + prefill_seconds)` |
+| Server TTFT (ms) | `1000 * request_done.timings_seconds.ttft` |
 | Decode phase (tok/s) | `(completion_tokens - 1) / decode_seconds` for each serial request |
 | Corpus prefill (tok/s) | Total computed prefill tokens / full corpus makespan |
 | Corpus decode (tok/s) | Total decode tokens / full corpus makespan |
@@ -95,8 +102,17 @@ intervals. Each published point is one wave, not a repeated-sample mean.
 | Spec acceptance | Accepted draft tokens / drafted tokens |
 | Spec tokens/round | `1 + accepted_tokens / speculative_rounds` |
 
-Server TTFT is an internal phase sum. It does not include ingress queueing or HTTP transport and
-is not the external streaming TTFT measured by the [Serve TTFT client](../../tools/bench/ttft/README.md).
+Server TTFT follows the production first-token boundary and includes service/Engine preparation
+and Engine queueing. It is separate from the [Serve TTFT client's](../../tools/bench/ttft/README.md)
+network observation, which starts before writing the HTTP request and ends at the first nonempty
+output delta. Execution phases can overlap and must not be added to reconstruct either TTFT.
+Serial result schema v8 and earlier used a phase sum; those historical values have a different
+boundary from the current server TTFT.
+
+Vision timing is the reported GPU stream interval. Serial records preserve its sample count;
+`vision_stream_seconds` is `null` when that count is zero, including when GPU timing is disabled.
+A positive sample count with a zero duration represents a measured zero. Request Host exposure
+includes all six reported phases, including `executor_flush`.
 The three decode rates have different time denominators and must not share an unlabeled column.
 Committed decode tokens exclude the first completion token produced by prefill.
 

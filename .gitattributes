@@ -1,3 +1,4 @@
-# Keep shell scripts LF-only so they survive Windows checkouts (Docker COPY).
-docker/entrypoint.sh text eol=lf
-*.sh text eol=lf
+# Preserve repository-pinned upstream sources byte-for-byte; NInfer-owned files retain Git's
+# default whitespace checks.
+/third_party/spdlog/include/** -whitespace
+/third_party/spdlog/src/** -whitespace

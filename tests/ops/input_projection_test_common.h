@@ -1,8 +1,10 @@
 #pragma once
 
+#include "cuda_fixture.h"
+#include "core/buffer.h"
+#include "core/weight.h"
 #include "ops/op_tester.h"
 #include "ops/quantized_weight.h"
-#include "ops/linear/fp8/fp8_prepack_sm70.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,36 +47,23 @@ inline std::vector<float> make_bf16_activation(std::int32_t rows, std::int32_t t
 class DevicePackedWeight {
 public:
     explicit DevicePackedWeight(quantized_weight::PackedWeight packed)
-        : host(std::move(packed)), expected_payload(host.payload), device(host.payload.size()) {
+        : host(std::move(packed)),
+          device(ninfer::test::cuda_environment().context.device(), host.payload.size()) {
         device.copy_from_host(host.payload.data(), host.payload.size());
-        layout = host.device_weight(device.p).layout;
     }
 
-    Weight view() const {
-        Weight weight = host.device_weight(device.p);
-        weight.layout = layout;
-        return weight;
-    }
-
-    void prepack_fp8() {
-        Weight weight = view();
-        ops::detail::fp8_prepack_qpn_sm70(weight);
-        layout = weight.layout;
-        device.copy_to_host(expected_payload.data(), expected_payload.size());
-    }
+    Weight view() const { return host.device_weight(device.span()); }
 
     int verify_preserved(std::string_view label) const {
-        std::vector<std::uint8_t> after(expected_payload.size());
+        std::vector<std::uint8_t> after(host.payload.size());
         device.copy_to_host(after.data(), after.size());
-        if (after == expected_payload) { return 0; }
+        if (after == host.payload) { return 0; }
         std::cerr << label << ": packed weight was modified\n";
         return 1;
     }
 
     quantized_weight::PackedWeight host;
-    std::vector<std::uint8_t> expected_payload;
     DeviceBuffer device;
-    QuantLayout layout = QuantLayout::RowSplit;
 };
 
 class GuardedBf16Tensor {
@@ -90,7 +79,11 @@ public:
 
     const void* data() const { return storage_.data(); }
 
-    Tensor tensor() { return Tensor(data(), DType::BF16, {rows_, tokens_}); }
+    MemorySpan span() { return storage_.span(); }
+
+    ConstMemorySpan span() const { return storage_.span(); }
+
+    Tensor tensor() { return Tensor(storage_.span(), DType::BF16, {rows_, tokens_}); }
 
     void copy_from_bits(std::span<const std::uint16_t> values) {
         if (values.size_bytes() != payload_bytes_) {
@@ -108,6 +101,15 @@ public:
     }
 
     int verify_guards(std::string_view label) const { return storage_.verify_guards(label); }
+
+    // Re-poison the payload so a replayed graph has to write every element again. Without this a
+    // second replay only overwrites the first result and cannot show that the executable still
+    // consumes the operand that lives at the captured address. The poison is issued on the caller's
+    // stream so it is ordered against the graph launch it precedes.
+    void repaint(cudaStream_t stream) {
+        cuda_check(cudaMemsetAsync(storage_.data(), kPoisonByte, payload_bytes_, stream),
+                   "guarded BF16 repaint");
+    }
 
     int verify_fully_written(std::string_view label) const {
         const std::vector<std::uint16_t> output = bits();
@@ -199,6 +201,14 @@ inline int verify_preserved(std::string_view label, const DeviceBuffer& device,
     const std::vector<std::int32_t> after = from_device<std::int32_t>(device, before.size());
     if (std::equal(after.begin(), after.end(), before.begin(), before.end())) { return 0; }
     std::cerr << label << ": I32 input was modified\n";
+    return 1;
+}
+
+inline int verify_preserved(std::string_view label, const DeviceBuffer& device,
+                            std::span<const std::int64_t> before) {
+    const auto after = from_device<std::int64_t>(device, before.size());
+    if (std::equal(after.begin(), after.end(), before.begin(), before.end())) { return 0; }
+    std::cerr << label << ": I64 input was modified\n";
     return 1;
 }
 

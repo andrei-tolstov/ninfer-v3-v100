@@ -9,6 +9,7 @@
 namespace ninfer::product {
 
 [[nodiscard]] inline SpeculativeBackend parse_speculative_backend(std::string_view value) {
+    if (value == "none") { return SpeculativeBackend::None; }
     if (value == "mtp") { return SpeculativeBackend::Mtp; }
     if (value == "dflash") { return SpeculativeBackend::DFlash; }
     if (value == "dflash2") { return SpeculativeBackend::DFlash2; }
@@ -33,18 +34,13 @@ inline void validate_speculative_cli_options(const SpeculativeOptions& options) 
     switch (options.backend) {
     case SpeculativeBackend::None:
         if (options.draft_tokens != 0 || options.proposal_head != ProposalHead::Full) {
-            throw std::invalid_argument(
-                "--draft-tokens and --lm-head-draft require --spec mtp|dflash|dflash2");
+            throw std::invalid_argument("nonzero drafts or an optimized proposal head require an "
+                                        "enabled speculative backend");
         }
         return;
     case SpeculativeBackend::Mtp:
-        // The sm_70 width-6+ target-verify regression (draft window >= 5 drifting off the
-        // greedy argmax) tracked back to the dedicated Volta small_t_i8/bf16 verify kernels
-        // dropped during the DFlash2 merge; both are restored (small_t_i8_volta.cuh,
-        // small_t_bf16_volta.cuh) and every draft window through 7 is bit-exact against
-        // --spec none again, so sm_70 no longer needs a narrower cap than upstream.
-        if (options.draft_tokens == 0 || options.draft_tokens > 7) {
-            throw std::invalid_argument("--spec mtp requires --draft-tokens in [1,7]");
+        if (options.draft_tokens == 0 || options.draft_tokens > 5) {
+            throw std::invalid_argument("--spec mtp requires --draft-tokens in [1,5]");
         }
         return;
     case SpeculativeBackend::DFlash:

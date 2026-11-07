@@ -1,151 +1,90 @@
 # AGENTS.md
 
-These rules apply to the whole repository.
+## 项目定位
 
-## Objective and scope
+NInfer 是 C++/CUDA 推理引擎，追求功能与数值正确、清晰的所有权和高性能。
+架构、权重绑定与执行保持明确；同一数学架构的不同 checkpoint 和表示组合使用
+同一架构入口，不按 checkpoint 名称注册独立执行路径。
 
-Complete the user's explicit deliverable within the applicable product and external contracts.
-Choose a coherent solution with functional and numerical correctness, clear ownership, strong
-architecture, and maximum performance at the requested scope. Do not sacrifice these goals to
-reduce the diff or implementation effort. Evaluate complexity, maintenance cost, and verification
-risk as engineering tradeoffs, not reasons to retain a known inferior design.
+`.ninfer` 是 C++ 产品的模型产物格式。生成、评分、CLI、服务和推理基准统一经过
+公共 Engine，不提供 Python 模型推理路径或安装、导出的 C++ SDK。
 
-Before substantial work, identify the deliverable and its completion conditions. Work is relevant
-when it completes that deliverable, preserves an applicable contract, resolves a material
-uncertainty, or checks a realistic regression. A necessary redesign is in scope; unrelated cleanup,
-hardening, compatibility, and benchmark campaigns are not. Address incidental findings when they
-block the outcome or are inseparable from the selected implementation.
+这是使用可信本地模型、产物和工作流的个人项目。
+围绕实际需求设计，不引入其他部署场景或信任模型的额外要求。
 
-For analysis or design, deliver the explanation or design. For diagnosis, establish the cause and
-supporting evidence; implement a fix when requested. For implementation, complete the selected
-design across its affected implementations, callers, tests, tools, and active documentation.
+## 职责与合同
 
-The current product and architecture govern ordinary work. An explicit task may change them;
-update the affected contracts and implementation together instead of treating the current design
-as an immutable prohibition. Skills provide task-specific methods, not additional deliverables or
-approval requirements beyond the user's instructions and the actual execution environment.
+每个模块负责自身的语义、支持范围、决策、状态和资源，通过明确的合同与其他模块协作。
 
-## Product and architecture
+调用方依据公开合同组织输入，只判断自身职责范围内的条件。
+实现约束、能力判断和超出支持范围的拒绝由对应实现者负责。
+上层不复制下层的支持规则，也不根据私有实现细节推断能力。
 
-NInfer is a from-scratch C++/CUDA inference engine for maximum single-GPU performance on explicitly
-registered artifacts. Current identities are `qwen3.6-27b/groupwise-int`, `qwen3.6-27b/nvfp4`,
-`qwen3.8-27b/groupwise-int`, `qwen3.8-27b/nvfp4`, and `qwen3.6-35b-a3b/groupwise-int`.
-The implementation targets `sm_120a` and is tuned on NVIDIA GeForce RTX 5090.
+同一约束和派生事实保持明确的权威来源。
+启动、规划、准备和执行需要这些信息时，通过所属模块的接口取得，不另建一套解释。
 
-Generation uses one GPU, one resident model, startup-fixed concurrency of one to eight requests,
-bounded FIFO ingress, no active-request preemption, and one compact decode batch per round.
-Generation and offline CausalScoring use the same public `.ninfer` Engine route. Delivered
-capabilities and commands are documented in `README.md`, the product guides, and executable
-`--help`. Additional models, execution platforms, large-scale/preemptive continuous batching, and
-priority/QoS require an explicit product change.
+资源的创建、修改、借用、同步和释放必须有明确归属。
+异步执行、共享和复制遵循合同规定的修改权限与生命周期。
 
-This is a local, single-owner project with trusted registered models, generated artifacts, and
-local workflow. Do not derive requirements from a different deployment or trust model.
+错误由无法履行自身合同的模块报告。调用方保留原因，补充必要上下文，
+并完成自己负责的恢复、取消、回收或对外呈现。
 
-Keep these ownership boundaries visible when selecting a design:
+## 实施与变更
 
-- `.ninfer` is the only C++ product artifact; CLI, serving, and inference benchmarks use the public
-  Engine. NInfer has no Python model-inference route or installed/exported C++ SDK.
-- Core owns physical primitives and raw transfers; artifact owns generic framing and
-  materialization; Ops own closed mathematical and state-transition implementations.
-- The Qwen3.6 family owns shared frontend semantics and compile-time planning/Program algorithms.
-  The 27B and 35B-A3B packages are peer Variants owning their identities, bindings, execution leaves,
-  and Program instance storage. Programs share no mutable state or device allocation.
-- Runtime owns common execution contracts and Engine publication policy; product/serving own input
-  acquisition and protocol translation. Target packages do not acquire media or own transport.
+修改前明确职责归属、接口合同和资源生命周期。
+边界不足时完善所属接口，不把其他模块的判断塞入调用方。
+审查正常执行、失败和资源结束路径中的决策与状态是否归属正确。
 
-Detailed family/package responsibilities and source ownership are defined in
-[Engine architecture](docs/maintainer/engine-architecture.md). Read the relevant boundary before
-changing it. Prefer explicit implementations for registered targets. Do not introduce generic model
-graphs, family base classes, plugin discovery, string-driven execution, hidden device allocation,
-runtime weight repacking, or placeholders for hypothetical targets without a product requirement.
+按语义和变化边界组织抽象、共享与特化，保留具体实现的优化空间。
+设备资源申请和权重物化应当显式归属；执行路径不隐藏设备分配或权重重打包。
 
-## Change consistency
+项目内部合同不承担历史兼容。替换合同后，删除受影响范围内已被取代的
+别名、兼容分支和对应测试。已公开的 OpenAI、Anthropic 协议属于外部合同，
+实现与协议测试保持一致。
 
-Project-owned APIs, CLIs, Python tools, fixtures, reports, formats, and documentation do not preserve
-backward compatibility. When replacing behavior, remove superseded aliases, fallbacks, transition
-branches, and their tests within the affected contract. Leave unrelated paths alone.
+用户要求提交时，使用 Conventional Commit，类型小写，标题简洁。
 
-Advertised OpenAI and Anthropic protocol behavior is an external contract. Changes update the
-affected schema tests and serving documentation together.
+## 验证与性能
 
-Keep stable requirements in their existing active reference. Temporary plans are useful only for
-active work; remove them when completed or abandoned. Maintain one current authority rather than
-parallel `final`, `v2`, or `new-design` documents.
+验证针对改变的可观察合同选择。
+数值计算按 Op 开发规范，使用独立数学参考或合同指定的精确参考验证实际生产路径。
+实现间一致或模型输出看似合理，不能证明数学正确。
+调度、协议、资源和生命周期变化，验证各自的行为与不变量。
 
-## Verification and completion
+性能结论与测量范围一致。Op 基准只证明 Op 性能。
+比较前确定基线、负载、测量条件、指标和判断标准；区分新增能力与既有实现的优化。
+如实报告实际数据、变化和不确定性，不把未经解释的差异直接认定为回退或测量波动。
 
-Select evidence to support the changed behavior and material claims. Tests should protect supported
-observable behavior, mathematical or state semantics, and realistic regressions, including plausible
-boundary failures that have not occurred yet. Avoid tests that merely mirror implementation,
-freeze private file/class organization, or increase coverage numbers.
+## 文档维护
 
-For numerical changes, identify represented public inputs, the independent mathematical oracle,
-semantic cast/quantization/state boundaries, output criteria, and relevant real model shapes. Each
-floating-point Op uses a naive FP32/FP64 oracle; exact transforms/codecs use an exact oracle. Packed
-inputs are independently decoded with their stored scales. Qualify production routes directly
-against that oracle, not another kernel or plausible model output. Private arithmetic need not
-reproduce unfused materializations unless an intermediate is an observable semantic boundary.
-[Op development](docs/maintainer/op-development.md) defines the full qualification contract.
+本文件只保存长期有效的项目规则，不记录当前支持清单、开发进度、临时方案或下一步计划。
+仅在用户明确要求修订规则时修改。
 
-Measure performance at the claimed scope. An Op microbenchmark establishes an Op result, not an
-end-to-end improvement. Use whole-inference profiling when an in-scope end-to-end attribution is
-unresolved; use kernel profiling when an identified kernel question can change the decision. Reuse
-applicable evidence and stop collecting once the relevant alternatives can be distinguished.
+实施期间专注代码和必要验证，过程信息按需放入临时材料。
+稳定文档由用户安排在阶段性完成后集中梳理，或按明确的文档任务修改；
+不随每次实现、修复或下一步计划自动增量更新。
 
-Choose the affected checks, rather than running this table as a checklist:
+每项稳定要求保留一个权威来源，通过引用连接相关文档，避免重复维护。
 
-| Change | Typical evidence |
-|---|---|
-| Documentation | affected links/references and `git diff --check` |
-| C++ runtime/API | affected build targets and behavioral tests |
-| Python tooling | Python 3.11 `py_compile` and affected tests |
-| Artifact framing/binding/conversion | affected contract tests; real artifact when semantics require it |
-| CUDA mathematics | independent oracle at relevant shapes and route boundaries |
-| Memory or lifetime | affected execution; sanitizer for a concrete lifetime question |
-| Performance | measurement at the claimed scope; profiling only for unresolved attribution |
-| Serving | affected schema tests and observable request/stream behavior |
+## 参考入口
 
-Record the target, relevant hardware/toolchain, workload or command, and summarized result needed
-to interpret a material claim. Hashes, clean worktrees, full command transcripts, raw report
-inventories, and exact probabilistic outputs are not default requirements. Use exact comparison for
-exact outputs, and appropriate numerical or behavioral criteria otherwise. State checks that could
-not run and their implications.
+- [引擎架构](docs/maintainer/engine-architecture.md)：修改执行或所有权前阅读。
+- [Op 开发](docs/maintainer/op-development.md)：修改 Op 或数值计算前阅读。
+- [构建系统](docs/maintainer/build-system.md)：编译目标与依赖组织。
+- [文档索引](docs/README.md)：具体合同与设计入口。
+- [README](README.md) 与程序 `--help`：产品使用和命令。
+- [测试](tests/README.md)与[基准](bench/README.md)：组织、命令和执行要求。
 
-Finish when the deliverable is usable, applicable contracts are satisfied, material claims have
-sufficient evidence, relevant checks pass or their limitations are clear, and no known in-scope
-issue blocks use. Expand or repeat verification only for new changes, failures, or unresolved risks
-that could change the result. Supporting work is not an independent completion objective.
+## 本地环境
 
-## Reference navigation
+使用 Python 3.11，显式调用 `/home/neroued/miniconda3/envs/py311/bin/python`。
+只有在选择维护环境或确认版本后才使用 `python3`。
 
-Read the authority relevant to the current decision; this is not a mandatory reading list.
+模型产物使用明确路径选择，不依赖 glob 顺序、修改时间或不明确的“最新版本”。
+源权重和大产物是任务前置资源，仅在任务范围包含时下载或重新生成。
 
-| Decision | Entry point |
-|---|---|
-| Product capabilities and exact commands | `README.md`, executable `--help`; `docs/cli.md`, `docs/serving.md`, `docs/perplexity.md` |
-| Execution, family/package ownership, scheduling, transactions, graphs | `docs/maintainer/engine-architecture.md` |
-| Context resources, checkpoints, replicas; physical KV | `docs/maintainer/resource-scheduling-and-context-cache.md`; `docs/maintainer/paged-kv-cache.md` |
-| Artifact, layout, codec, or exact target mathematics | model/artifact references linked from `docs/README.md` |
-| Op contracts, implementation ownership, numerical/performance qualification | `docs/maintainer/op-development.md` |
-| Test/benchmark commands and published performance | `tests/README.md`, `bench/README.md`, `docs/performance.md` |
-| In-tree C++ interface | `include/ninfer/engine.h`, `include/ninfer/types.h` |
+所有 agent 临时文件放在仓库根目录 `.agent-tmp/<task>/`，包括临时计划、实验代码、
+测试数据、日志、性能记录和中间产物。该目录由 Git 忽略，不提交其内容；
+任务结束时删除不再需要的临时文件。
 
-[Documentation map](docs/README.md) routes to narrower authorities when needed.
-
-## Local operations
-
-Use `cmake --build <build-dir> -j` by default. Adjust parallelism when actual resource pressure
-causes failures or interferes with the task, and briefly explain why.
-
-Use the selected Python 3.11 interpreter explicitly. On this machine it is
-`/home/neroued/miniconda3/envs/py311/bin/python`; the default shell's `python3` may be a different
-version. Use `python3` only after selecting the maintainer environment or checking its version.
-Normal resources are `build/`, `out/qwen3_6_27b.ninfer`, its `.conversion.json` report, and
-`profiles/ncu/`, `profiles/nsys/`, `profiles/bench/`; the local toolchain is CUDA 13.1.
-Select model artifacts by explicit path, never glob order, modification time, or unqualified
-“latest”. Source checkpoints and large artifacts are prerequisites; download or regenerate them
-only when that work is in scope. Install or upgrade dependencies only when the task needs it.
-
-Create commits only when requested. Use Conventional Commit subjects with concise lowercase types
-such as `feat`, `fix`, `perf`, `bench`, `test`, `build`, `refactor`, `docs`, or `chore`.
+`out/` 保留给模型权重、配套文件及用户明确保留的重要产物，不用于临时实验。
