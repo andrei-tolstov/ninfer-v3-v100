@@ -33,3 +33,16 @@ if(NINFER_TARGET STREQUAL "dgx_spark")
   target_sources(ninfer_ops_non_rdc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/nvfp4/dgx_spark/shapes/n12288_k4096_tma.cu")
   target_sources(ninfer_ops PRIVATE "${CMAKE_CURRENT_LIST_DIR}/bf16/dgx_spark/shapes/n2048_k4096.cu")
 endif()
+
+if(NINFER_TARGET_VOLTA)
+  target_sources(ninfer_ops PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_cutlass_sm70.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_qpn_split.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/fp8_linear_swiglu_volta_qpn.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/nvfp4_linear_swiglu_qpn_split.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/nvfp4_linear_swiglu_volta_qpn.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/q4_linear_swiglu_cutlass_sm70.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/w8_linear_swiglu_gemm_splitk.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/w8_linear_swiglu_decode.cu"
+  )
+endif()

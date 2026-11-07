@@ -21,3 +21,11 @@ target_sources(ninfer_ops_non_rdc PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n5120_k17408_tma.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n5120_k6144_tma.cu"
 )
+
+if(NINFER_TARGET_VOLTA)
+  target_sources(ninfer_ops PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/bf16/bf16_linear_add_volta.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/q5/q5_linear_add_cutlass_sm70.cu"
+    "${CMAKE_CURRENT_LIST_DIR}/q5/q5_linear_add_gemm_simt.cu"
+  )
+endif()

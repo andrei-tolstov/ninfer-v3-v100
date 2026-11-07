@@ -1,10 +1,34 @@
 #include "ops/linear/projection/q4/q4_dispatch.h"
+#include "ops/linear/kernels/q4/q4_launch.h"
 #include "ops/linear/projection/q4/q4_shapes.h"
 #include "core/platform.h"
 #include <array>
 #include <stdexcept>
 
 namespace ninfer::ops::detail {
+
+#if NINFER_TARGET_VOLTA
+
+void q4_dispatch(const Tensor& x, const Weight& w, Tensor& out, LinearPolicy,
+                 cudaStream_t stream) {
+    const std::int32_t t = x.ne[1];
+    if (t <= 0) throw std::invalid_argument("q4 linear: T must be positive");
+
+    if (q4_uses_volta_qpn(out.ne[0], x.ne[0], t)) {
+        launch_q4_volta_qpn(x, w, out, stream);
+        return;
+    }
+    if (q4_volta_mma_supported(out.ne[0], x.ne[0], t)) {
+        MemorySpan empty_storage{nullptr, 0, Device::cpu()};
+        MemoryArena dummy(empty_storage);
+        launch_q4_volta_mma(x, w, out, dummy, stream, 1);
+        return;
+    }
+    throw std::invalid_argument("q4 linear: unsupported shape on Volta");
+}
+
+#else
+
 namespace {
 struct ShapeEntry {
     std::int32_t n, k;
@@ -47,4 +71,7 @@ void q4_dispatch(const Tensor& x, const Weight& weight, Tensor& out, LinearPolic
                  cudaStream_t stream) {
     select_q4_launch(weight.n, weight.k, x.ne[1], policy)(x, weight, out, stream);
 }
+
+#endif // NINFER_TARGET_VOLTA
+
 } // namespace ninfer::ops::detail

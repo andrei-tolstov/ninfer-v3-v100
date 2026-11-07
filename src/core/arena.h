@@ -57,4 +57,7 @@ private:
     std::size_t peak_   = 0;
 };
 
+using WorkspaceArena = MemoryArena;
+using DeviceSpan     = MemorySpan;
+
 } // namespace ninfer

@@ -1,10 +1,22 @@
 #include "ops/linear/projection/bf16/bf16_dispatch.h"
+#include "ops/linear/kernels/bf16/bf16_launch.h"
 #include "ops/linear/projection/bf16/bf16_shapes.h"
 #include "core/platform.h"
 #include <array>
 #include <stdexcept>
 
 namespace ninfer::ops::detail {
+
+#if NINFER_TARGET_VOLTA
+
+Bf16Launch select_bf16_a16_launch(std::int32_t n, std::int32_t k, std::int32_t t) {
+    if (t <= 0) throw std::invalid_argument("bf16 linear: T must be positive");
+    if (n == 256 && k == 5120) { return launch_bf16_n256_k5120; }
+    return launch_bf16_cutlass_sm70;
+}
+
+#else
+
 namespace {
 struct ShapeEntry {
     std::int32_t n, k;
@@ -71,6 +83,8 @@ Bf16Launch select_bf16_a16_launch(std::int32_t n, std::int32_t k, std::int32_t t
     throw std::invalid_argument("bf16 linear: unsupported shape");
 }
 
+#endif // NINFER_TARGET_VOLTA
+
 Bf16Launch select_bf16_launch(std::int32_t n, std::int32_t k, std::int32_t t, LinearPolicy policy) {
     if (!valid_linear_policy(policy))
         throw std::invalid_argument("bf16 linear: unsupported policy");
@@ -81,4 +95,5 @@ void bf16_dispatch(const Tensor& x, const Weight& weight, Tensor& out, LinearPol
                    cudaStream_t stream) {
     select_bf16_launch(weight.n, weight.k, x.ne[1], policy)(x, weight, out, stream);
 }
+
 } // namespace ninfer::ops::detail

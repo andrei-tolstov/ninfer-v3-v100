@@ -2,29 +2,29 @@
 
 #include "core/weight.h"
 #include "core/tensor.h"
+#include "core/platform.h"
+
 #include <cuda_runtime.h>
+
+#include <cstdint>
 
 namespace ninfer::ops::detail {
 
 using Q8Launch = void (*)(const Tensor&, const Weight&, Tensor&, cudaStream_t);
+using W8Launch = Q8Launch;
 
-void launch_q8_a16_gemv_r4_w1_k16384(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_simt_r8_t4(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_simt_r8_t8(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r32_t64(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r32_t96(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r32_t128(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r48_t64(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r64_t96(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r64_t128(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r96_t96(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r128_t64(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r128_t80(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r64x16_t48_k128_a1(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_mma_r64x32_t64_k128_a1(const Tensor&, const Weight&, Tensor&, cudaStream_t);
+#if NINFER_TARGET_VOLTA
+void launch_w8_volta_mma(const Tensor&, const Weight&, Tensor&, cudaStream_t);
+[[nodiscard]] bool w8_volta_mma_supported(std::int32_t n, std::int32_t k,
+                                          std::int32_t t) noexcept;
 
-void launch_q8_a16_simt_r4_t4_w2_g16_s2(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_sliced_r16_t16_w8_s2(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_sliced_r16_t16_w4_s2(const Tensor&, const Weight&, Tensor&, cudaStream_t);
-void launch_q8_a16_sliced_r16_t32_w4_s2(const Tensor&, const Weight&, Tensor&, cudaStream_t);
+void launch_w8_volta_qpn(const Tensor&, const Weight&, Tensor&, cudaStream_t);
+void launch_w8_volta_qpn_dynamic_conv_add(const Tensor& x, const Weight& weight,
+                                          const Tensor& base, const Tensor& finish_delta,
+                                          Tensor& residual, std::int32_t width,
+                                          cudaStream_t stream);
+[[nodiscard]] bool w8_volta_qpn_supported(std::int32_t n, std::int32_t k,
+                                          std::int32_t t) noexcept;
+#endif // NINFER_TARGET_VOLTA
+
 } // namespace ninfer::ops::detail
