@@ -1,0 +1,30 @@
+# v100-qwen3_8-27b-nvfp4: Tesla V100 (SXM2/PCIe 32GB/16GB) deployment example.
+# Set model.path to your artifact entry file before use.
+# Optimized for sm_70 architecture: INT8 KV cache, MTP draft tokens 3, prefill chunk 2048.
+
+[model]
+path = "/data/models/ninfer/qwen3_8_27b_nvfp4.ninfer"
+vision = true
+
+[engine]
+max_context = 215040 # Optimal V100 32G limit with vision + prefill 2048 + host-kv 8192
+max_concurrency = 1
+kv_dtype = "int8"     # INT8 KV with Hadamard D256 transform on V100
+context_capacity = "auto"
+memory_headroom = "256MiB"
+prefill_chunk = 2048
+cuda_graph = true
+
+[speculative]
+backend = "mtp"
+draft_tokens = 3
+proposal_head = "optimized"
+
+[vision]
+memory_budget = "1GiB"
+
+[server]
+host = "0.0.0.0"
+port = 7006
+model_id = "qwen3.8-27b"
+# api_key = "replace-with-your-key"

@@ -7,6 +7,13 @@
 #include <limits>
 #include <stdexcept>
 
+#if NINFER_TARGET_VOLTA
+#include "ops/linear/fp8/fp8_prepack_sm70.h"
+#include "ops/linear/nvfp4/nvfp4_prepack_sm70.h"
+#include <mutex>
+#include <unordered_set>
+#endif
+
 namespace ninfer::ops {
 namespace {
 
@@ -105,7 +112,27 @@ SingleProjectionWeight single(const WeightView& view, std::span<const WeightInpu
         }
         if (input_scale == 0) { input_scale = 1.0F; }
     }
-    return {native_weight(view, input_scale), policy};
+    auto weight = native_weight(view, input_scale);
+#if NINFER_TARGET_VOLTA
+    if (weight.device.type() == DeviceType::CUDA &&
+        weight.layout != QuantLayout::VoltaQpnPrepacked) {
+        static std::mutex s_prepack_mutex;
+        static std::unordered_set<const void*> s_prepacked;
+        std::lock_guard lock(s_prepack_mutex);
+        if (s_prepacked.find(weight.qdata) != s_prepacked.end()) {
+            weight.layout = QuantLayout::VoltaQpnPrepacked;
+        } else {
+            if (weight.qtype == QType::FP8_E4M3FN_ROW_BF16S && weight.n % 32 == 0 && weight.k % 128 == 0) {
+                ::ninfer::ops::detail::fp8_prepack_qpn_sm70(weight);
+                s_prepacked.insert(weight.qdata);
+            } else if (weight.qtype == QType::NVFP4 && weight.n % 32 == 0 && weight.k % 64 == 0) {
+                ::ninfer::ops::detail::nvfp4_prepack_qpn_sm70(weight);
+                s_prepacked.insert(weight.qdata);
+            }
+        }
+    }
+#endif
+    return {weight, policy};
 }
 
 SingleProjectionWeight single(std::span<const WeightInput> inputs) {
@@ -117,9 +144,15 @@ LinearProfile describe_single(const WeightView& view, std::span<const WeightInpu
     require(view.shape.size() == 2 && view.shape[0] <= INT32_MAX && view.shape[1] <= INT32_MAX,
             "projection dimensions exceed int32");
     const auto& geometry = region.parent->geometry;
-    const auto layout    = geometry.layout == QuantLayout::BatchedBlockScaleK16M128x4
+    auto layout          = geometry.layout == QuantLayout::BatchedBlockScaleK16M128x4
                                ? QuantLayout::BlockScaleK16M128x4
                                : geometry.layout;
+#if NINFER_TARGET_VOLTA
+    if ((geometry.format == QType::FP8_E4M3FN_ROW_BF16S && view.shape[0] % 32 == 0 && view.shape[1] % 128 == 0) ||
+        (geometry.format == QType::NVFP4 && view.shape[0] % 32 == 0 && view.shape[1] % 64 == 0)) {
+        layout = QuantLayout::VoltaQpnPrepacked;
+    }
+#endif
     return {geometry.format, static_cast<std::int32_t>(view.shape[0]),
             static_cast<std::int32_t>(view.shape[1]), common_policy(inputs), layout};
 }

@@ -1,6 +1,8 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # NInfer
 
-> Native C++/CUDA inference for selected models on RTX 5090 and DGX Spark.
+> Native C++/CUDA inference for selected models on RTX 5090, DGX Spark, and NVIDIA Tesla V100 (sm_70).
 
 NInfer runs text and image/video generation through a local CLI or OpenAI- and
 Anthropic-compatible HTTP APIs. It supports single-device execution and model-parallel execution
@@ -11,8 +13,8 @@ One Engine serves one model with up to eight active requests.
 
 | Model | Architecture | Deployment | Speculative backends |
 |---|---|---|---|
-| Qwen3.6-27B / Qwen3.8-27B | Qwen3.5 Dense | RTX 5090 | MTP; DFlash2 for Qwen3.8-27B with companion weights |
-| Qwen3.6-35B-A3B | Qwen3.5 MoE | RTX 5090, resident or CPU expert offload | MTP or DFlash with companion weights |
+| Qwen3.6-27B / Qwen3.8-27B | Qwen3.5 Dense | RTX 5090, Tesla V100 (SXM2/PCIe 32GB/16GB) | MTP; DFlash2 for Qwen3.8-27B with companion weights |
+| Qwen3.6-35B-A3B | Qwen3.5 MoE | RTX 5090, Tesla V100, resident or CPU expert offload | MTP or DFlash with companion weights |
 | Qwen3.8-Flash-Next | Qwen4Exp | RTX 5090 with CPU expert offload; one or two Sparks | MTP |
 | GLM-5.3-Flash | GLM5Next | Two Sparks | MTP |
 
@@ -29,7 +31,7 @@ deployments, including Vision, FP8 KV, MTP3 and the optimized draft head.
 
 ## Build
 
-Build natively on Linux: x86-64 / `sm_120a` for RTX 5090, AArch64 / `sm_121a` for DGX Spark.
+Build natively on Linux: x86-64 / `sm_120a` for RTX 5090, AArch64 / `sm_121a` for DGX Spark, or `sm_70` for NVIDIA Tesla V100.
 Dependencies are a CUDA toolkit supporting the target, CMake 3.28+, a C++20 host compiler,
 Ninja, `pkg-config`, libjpeg development headers, FFmpeg development libraries
 (`libavformat`, `libavcodec`, `libavutil`, `libswscale`), `hwloc >= 2.5`, `liburing >= 2.5`,
@@ -49,6 +51,23 @@ For two Sparks, install NCCL development headers and libraries and build on **bo
 cmake --preset dgx-spark-release -DNINFER_ENABLE_DISTRIBUTED=ON
 cmake --build build/dgx-spark-release -j
 ```
+
+### Tesla V100 (sm_70)
+
+CUDA 12.8 is required (CUDA 13 removed offline compilation for Volta).
+```bash
+cmake --preset v100-release
+cmake --build build/v100-release -j
+```
+Or configure explicitly:
+```bash
+cmake -S . -B build-v100 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
+  -DCMAKE_CUDA_ARCHITECTURES=70
+cmake --build build-v100 -j
+```
+For detailed V100 recipes, Docker deployment, and benchmarks, see [docs/V100-BUILD.md](docs/V100-BUILD.md), [docs/v100.md](docs/v100.md), and [docker/README.md](docker/README.md).
+
 
 Product binaries are `apps/ninfer`, `apps/ninfer-serve`, `apps/ninfer-perplexity`, and, with
 distributed execution enabled, `apps/ninfer-worker`. Run them from the build tree; keep its `lib/`
